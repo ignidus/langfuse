@@ -1,0 +1,134 @@
+name: Deploy to Dev
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-west-2
+  AWS_ACCOUNT_ID: "694679581764"
+  ECS_CLUSTER: langfuse-dev
+  WEB_SERVICE: langfuse-web-dev
+  WORKER_SERVICE: langfuse-worker-dev
+  WEB_ECR_REPO: langfuse/web
+  WORKER_ECR_REPO: langfuse/worker
+  WEB_TASK_FAMILY: langfuse-web-dev
+  WORKER_TASK_FAMILY: langfuse-worker-dev
+  EXECUTION_ROLE_ARN: "arn:aws:iam::694679581764:role/langfuse-execution"
+  TASK_ROLE_ARN: "arn:aws:iam::694679581764:role/langfuse-task"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [web, worker]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::694679581764:role/github-actions-langfuse-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set image variables
+        id: vars
+        run: |
+          if [ "${{ matrix.service }}" = "web" ]; then
+            echo "ecr_repo=${{ env.WEB_ECR_REPO }}" >> "$GITHUB_OUTPUT"
+            echo "dockerfile=web/Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "task_family=${{ env.WEB_TASK_FAMILY }}" >> "$GITHUB_OUTPUT"
+            echo "ecs_service=${{ env.WEB_SERVICE }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ecr_repo=${{ env.WORKER_ECR_REPO }}" >> "$GITHUB_OUTPUT"
+            echo "dockerfile=worker/Dockerfile" >> "$GITHUB_OUTPUT"
+            echo "task_family=${{ env.WORKER_TASK_FAMILY }}" >> "$GITHUB_OUTPUT"
+            echo "ecs_service=${{ env.WORKER_SERVICE }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push ARM64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.vars.outputs.dockerfile }}
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.vars.outputs.ecr_repo }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.vars.outputs.ecr_repo }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Get current task definition
+        id: current-task-def
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ steps.vars.outputs.task_family }} \
+            --query 'taskDefinition' \
+            --output json > /tmp/task-def.json
+
+          # Remove fields that can't be re-registered
+          python3 -c "
+          import json
+          with open('/tmp/task-def.json') as f:
+              td = json.load(f)
+          for key in ['taskDefinitionArn','revision','status','requiresAttributes','compatibilities','registeredAt','registeredBy']:
+              td.pop(key, None)
+          # Update image
+          registry = '${{ steps.login-ecr.outputs.registry }}'
+          repo = '${{ steps.vars.outputs.ecr_repo }}'
+          tag = '${{ github.sha }}'
+          new_image = f'{registry}/{repo}:{tag}'
+          td['containerDefinitions'][0]['image'] = new_image
+          with open('/tmp/task-def-updated.json', 'w') as f:
+              json.dump(td, f)
+          print(f'Updated image to: {new_image}')
+          "
+
+      - name: Register new task definition
+        id: register
+        run: |
+          NEW_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/task-def-updated.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          echo "task_def_arn=$NEW_ARN" >> "$GITHUB_OUTPUT"
+          echo "Registered: $NEW_ARN"
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ steps.vars.outputs.ecs_service }} \
+            --task-definition ${{ steps.register.outputs.task_def_arn }} \
+            --query 'service.serviceName' \
+            --output text
+          echo "Service ${{ steps.vars.outputs.ecs_service }} updated."
+
+      - name: Wait for deployment stability
+        run: |
+          echo "Waiting for ${{ steps.vars.outputs.ecs_service }} to stabilize..."
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ steps.vars.outputs.ecs_service }} \
+            --timeout 600
+          echo "Service stable."
