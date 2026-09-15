@@ -203,6 +203,7 @@ COPY --chown=nextjs:nodejs ./packages/shared/scripts/cleanup.sql ./packages/shar
 RUN chmod +x ./web/entrypoint.sh
 
 # Zscaler root CA for TGW IPSec TLS inspection
+RUN apk add --no-cache ca-certificates
 COPY zscaler-root.crt /usr/local/share/ca-certificates/zscaler-root.crt
 RUN update-ca-certificates
 ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/zscaler-root.crt
