@@ -29,7 +29,7 @@ env:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm64
     strategy:
       matrix:
         service: [web, worker]
@@ -134,6 +134,5 @@ jobs:
           echo "Waiting for ${{ steps.vars.outputs.ecs_service }} to stabilize..."
           aws ecs wait services-stable \
             --cluster ${{ env.ECS_CLUSTER }} \
-            --services ${{ steps.vars.outputs.ecs_service }} \
-            --timeout 600
+            --services ${{ steps.vars.outputs.ecs_service }}
           echo "Service stable."
