@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import {
   buildWidgetExport,
   buildWidgetImportAllowedValues,
@@ -146,14 +148,20 @@ describe("parseAndNormalizeImportedWidget", () => {
       optionSets: {
         observationLevels: [],
       },
-      isBetaEnabled: true,
+      isV4: true,
     });
 
     expect(result.snapshot.selectedView).toBe("traces");
     expect(result.snapshot.widgetMinVersion).toBe(1);
   });
 
-  it("validates a v2-required imported shape without rewriting its version hint", () => {
+  it("accepts v2-only imported fields without rewriting the version hint", () => {
+    const rootFilter = {
+      column: "isRootObservation",
+      type: "boolean" as const,
+      operator: "=" as const,
+      value: true,
+    };
     const result = parseImportedWidgetJson({
       parsedJson: {
         ...baseWidget,
@@ -161,12 +169,13 @@ describe("parseAndNormalizeImportedWidget", () => {
         dimensions: [{ field: "experimentName" }],
         chartType: "VERTICAL_BAR",
         chartConfig: { type: "VERTICAL_BAR" },
-        filters: [],
+        filters: [rootFilter],
       },
-      isBetaEnabled: false,
+      isV4: false,
     });
 
     expect(result.widget.minVersion).toBe(1);
+    expect(result.widget.filters).toEqual([rootFilter]);
   });
 
   it("imports boolean score widgets with boolean filters intact", async () => {
@@ -190,7 +199,7 @@ describe("parseAndNormalizeImportedWidget", () => {
           }),
       } as File,
       optionSets: { observationLevels: [] },
-      isBetaEnabled: true,
+      isV4: true,
     });
 
     expect(result.snapshot).toMatchObject({
@@ -218,7 +227,7 @@ describe("parseAndNormalizeImportedWidget", () => {
       optionSets: {
         observationLevels: [],
       },
-      isBetaEnabled: false,
+      isV4: false,
     });
 
     expect(result.snapshot.widgetName).toBe("Imported widget");
@@ -237,7 +246,7 @@ describe("parseAndNormalizeImportedWidget", () => {
         optionSets: {
           observationLevels: [],
         },
-        isBetaEnabled: false,
+        isV4: false,
       }),
     ).rejects.toThrow();
   });
@@ -277,21 +286,21 @@ describe("parsePastedWidget", () => {
   };
 
   it("ignores non-JSON text", () => {
-    expect(parsePastedWidget("hello world", { isBetaEnabled: false })).toEqual({
+    expect(parsePastedWidget("hello world", { isV4: false })).toEqual({
       status: "not-widget",
     });
   });
 
   it("ignores JSON without the widget envelope", () => {
     expect(
-      parsePastedWidget(JSON.stringify(baseWidget), { isBetaEnabled: false }),
+      parsePastedWidget(JSON.stringify(baseWidget), { isV4: false }),
     ).toEqual({ status: "not-widget" });
   });
 
   it("parses an enveloped widget export", () => {
     const result = parsePastedWidget(
       JSON.stringify(buildWidgetExport(baseWidget)),
-      { isBetaEnabled: false },
+      { isV4: false },
     );
 
     expect(result.status).toBe("widget");
@@ -307,7 +316,7 @@ describe("parsePastedWidget", () => {
         ...buildWidgetExport(baseWidget),
         version: WIDGET_FILE_FORMAT_VERSION + 1,
       }),
-      { isBetaEnabled: false },
+      { isV4: false },
     );
 
     expect(result.status).toBe("invalid");
@@ -323,7 +332,7 @@ describe("parsePastedWidget", () => {
         // chartConfig.type no longer matches chartType
         chartConfig: { type: "PIE" },
       }),
-      { isBetaEnabled: false },
+      { isV4: false },
     );
 
     expect(result.status).toBe("invalid");

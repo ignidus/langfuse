@@ -21,8 +21,10 @@ import { AppSidebar } from "@/src/components/nav/AppSidebar/AppSidebar";
 import { SidebarPresenceProvider } from "@/src/components/nav/sidebar-presence";
 import { Toaster } from "@/src/components/ui/sonner";
 import { Layer } from "@/src/components/ui/layer";
-import { TopBannerProvider } from "@/src/features/top-banner";
-import { VersionUpdateBanner } from "@/src/features/version-update";
+import {
+  VersionUpdateBanner,
+  useVersionUpdatePrompt,
+} from "@/src/features/version-update";
 import { AppContentWithRightDrawer } from "../right-drawer/AppContentWithRightDrawer";
 import { ThemeToggle } from "@/src/features/theming/ThemeToggle";
 import {
@@ -36,8 +38,12 @@ import type { RouteGroup } from "@/src/components/layouts/routes";
 import dynamic from "next/dynamic";
 import { ControlledFeaturePreviewModal } from "@/src/features/feature-previews/components/ControlledFeaturePreviewModal";
 import { InAppAgentWindowHost } from "@/src/features/in-app-agent/components/InAppAgentWindowHost";
-import { useV4UpgradeUiEnabled } from "@/src/features/v4-migration/useV4UpgradeUiEnabled";
+import {
+  useV4UpgradeUiEnabled,
+  useV4UpgradeUiFlag,
+} from "@/src/features/v4-migration/useV4UpgradeUiEnabled";
 import { useUiCustomization } from "@/src/ee/features/ui-customization/useUiCustomization";
+import { findCurrentInstance } from "@/src/ee/features/ui-customization/instanceLinks";
 import { api } from "@/src/utils/api";
 import { usePlan } from "@/src/features/entitlements/hooks";
 import { env } from "@/src/env.mjs";
@@ -46,6 +52,11 @@ import { usePostHogClientCapture } from "@/src/features/posthog-analytics/usePos
 import { useSession } from "next-auth/react";
 import { useQueryProjectOrOrganization } from "@/src/features/projects/hooks";
 import { useHasOrganizationAccess } from "@/src/features/rbac/utils/checkOrganizationAccess";
+import {
+  PaymentBannerView,
+  usePaymentBanner,
+} from "@/src/features/payment-banner";
+import { useTopBannerHeight } from "@/src/features/top-banner";
 
 const DISMISSED_SIDEBAR_NOTIFICATIONS_KEY = "dismissed-sidebar-notifications";
 
@@ -53,16 +64,6 @@ const CommandMenu = dynamic(
   () =>
     import("@/src/features/command-k-menu/CommandMenu").then((mod) => ({
       default: mod.CommandMenu,
-    })),
-  {
-    ssr: false,
-  },
-);
-
-const PaymentBanner = dynamic(
-  () =>
-    import("@/src/features/payment-banner").then((mod) => ({
-      default: mod.PaymentBanner,
     })),
   {
     ssr: false,
@@ -87,7 +88,7 @@ type GroupedNavigation = {
 };
 
 type AuthenticatedLayoutProps = PropsWithChildren<{
-  session: Session;
+  user: NonNullable<Session["user"]>;
   navigation: {
     mainNavigation: GroupedNavigation;
     secondaryNavigation: GroupedNavigation;
@@ -113,7 +114,7 @@ type AuthenticatedLayoutProps = PropsWithChildren<{
  */
 export function AuthenticatedLayout({
   children,
-  session,
+  user,
   navigation,
   metadata,
   onSignOut,
@@ -122,14 +123,13 @@ export function AuthenticatedLayout({
   const [featurePreviewOpen, setFeaturePreviewOpen] = useState(false);
   const router = useRouter();
   useProjectCookie(router);
-
-  // Safe assertion: AuthenticatedLayout is only rendered after auth checks pass
-  // in AppLayout, which guarantees session.user exists at this point
-  const user = session.user;
-  if (!user) {
-    // This should never happen due to guards in AppLayout, but TypeScript needs this
-    return null;
-  }
+  const uiCustomization = useUiCustomization();
+  const versionUpdatePrompt = useVersionUpdatePrompt();
+  const paymentBanner = usePaymentBanner();
+  const topBannerRef = useTopBannerHeight();
+  // Account-level entry: use the raw flag (same as account settings tabs), not
+  // project-scoped force-v3 suppression.
+  const showV4Migration = useV4UpgradeUiFlag();
 
   const regionMenuItems = getAvailableCloudRegionOptions(currentRegion).map(
     (region) => ({
@@ -147,6 +147,23 @@ export function AuthenticatedLayout({
     }),
   );
 
+  // Self-hosted instance switcher (EE): configured via
+  // LANGFUSE_UI_INSTANCE_LINKS, delivered through the uiCustomization query.
+  const instanceLinks = uiCustomization?.instanceLinks ?? null;
+  const currentInstance = instanceLinks
+    ? findCurrentInstance(
+        instanceLinks,
+        typeof window !== "undefined" ? window.location.host : undefined,
+      )
+    : undefined;
+  const instanceMenuItems = (instanceLinks ?? []).map((link) => ({
+    type: "action" as const,
+    name: link.name,
+    onClick: () => {
+      window.open(link.url, "_blank", "noopener,noreferrer");
+    },
+  }));
+
   const hasFeaturePreviews = isLangfuseCloud || user.v4BetaEnabled === true;
 
   // User navigation items for sidebar dropdown
@@ -161,6 +178,15 @@ export function AuthenticatedLayout({
       name: "Account Settings",
       href: "/account/settings",
     },
+    ...(showV4Migration
+      ? [
+          {
+            type: "link" as const,
+            name: "v4 Migration",
+            href: "/v4-migration",
+          },
+        ]
+      : []),
     {
       type: "action" as const,
       name: "Theme",
@@ -193,6 +219,23 @@ export function AuthenticatedLayout({
           },
         ]
       : []),
+    ...(instanceMenuItems.length > 0
+      ? [
+          {
+            type: "submenu" as const,
+            name: "Instances",
+            subItems: instanceMenuItems,
+            content: currentInstance ? (
+              <>
+                Instances
+                <div className="ml-2 inline-flex rounded bg-black/5 p-1 text-xs dark:bg-white/10">
+                  Current: {currentInstance.name}
+                </div>
+              </>
+            ) : undefined,
+          },
+        ]
+      : []),
     { type: "action" as const, name: "Sign out", onClick: onSignOut },
   ];
 
@@ -200,65 +243,99 @@ export function AuthenticatedLayout({
     <>
       <Head>
         <title>{metadata.title}</title>
-        <link rel="icon" type="image/svg+xml" href={metadata.faviconPath} />
         <link
+          key="favicon-svg"
+          rel="icon"
+          type="image/svg+xml"
+          href={metadata.faviconPath}
+        />
+        <link
+          key="favicon-png"
           rel="icon"
           type="image/png"
           sizes="256x256"
           href={metadata.favicon256Path}
         />
-        <link rel="apple-touch-icon" href={metadata.appleTouchIconPath} />
+        <link
+          key="apple-touch-icon"
+          rel="apple-touch-icon"
+          href={metadata.appleTouchIconPath}
+        />
       </Head>
 
-      <TopBannerProvider>
-        <SidebarPresenceProvider>
-          <SidebarProvider>
-            <div className="flex h-dvh w-full flex-col">
-              <PaymentBanner />
-              <PreviewDeploymentBanner />
-              <VersionUpdateBanner />
-              <div className="pt-banner-offset flex min-h-0 flex-1">
-                <ConnectedAppSidebar
-                  navItems={navigation.mainNavigation}
-                  secondaryNavItems={navigation.secondaryNavigation}
-                  user={sidebarUser}
-                  userMenuItems={userMenuItems}
-                  isLangfuseCloud={isLangfuseCloud}
-                  routerProjectId={
-                    typeof router.query.projectId === "string"
-                      ? router.query.projectId
-                      : undefined
-                  }
+      <SidebarPresenceProvider>
+        <SidebarProvider>
+          <div className="flex h-dvh w-full flex-col">
+            <div
+              ref={topBannerRef}
+              className="fixed top-0 z-51 flex w-full flex-col"
+            >
+              {paymentBanner && (
+                <PaymentBannerView
+                  organizationName={paymentBanner.organizationName}
+                  billingSettingsHref={paymentBanner.billingSettingsHref}
+                  severity={paymentBanner.severity}
                 />
-                <SidebarInset className="h-screen-with-banner max-w-full md:peer-data-[state=collapsed]:w-[calc(100vw-var(--sidebar-width-icon))] md:peer-data-[state=expanded]:w-[calc(100vw-var(--sidebar-width))]">
-                  <AppContentWithRightDrawer>
-                    {children}
-                  </AppContentWithRightDrawer>
-                  {/* Toasts render in the `toast` overlay layer — the last layer
+              )}
+              {env.NEXT_PUBLIC_PREVIEW_PR_URL && (
+                <PreviewDeploymentBanner
+                  prUrl={env.NEXT_PUBLIC_PREVIEW_PR_URL}
+                />
+              )}
+            </div>
+            {versionUpdatePrompt.isVisible && (
+              <VersionUpdateBanner
+                onReload={versionUpdatePrompt.reload}
+                onDismiss={versionUpdatePrompt.dismiss}
+              />
+            )}
+            <div className="pt-banner-offset flex min-h-0 flex-1">
+              <ConnectedAppSidebar
+                navItems={navigation.mainNavigation}
+                secondaryNavItems={navigation.secondaryNavigation}
+                user={sidebarUser}
+                userMenuItems={userMenuItems}
+                isLangfuseCloud={isLangfuseCloud}
+                routerProjectId={
+                  typeof router.query.projectId === "string"
+                    ? router.query.projectId
+                    : undefined
+                }
+              />
+              {/* `min-w-0`, not a `100vw`-derived width: viewport units ignore
+                    scrollbars, and a definite width also floors `min-width:
+                    auto`, so on a wide page the inset stayed pinned 15px past
+                    the space beside the sidebar once a space-taking vertical
+                    scrollbar showed — spawning a horizontal one. Flex already
+                    sizes the inset to that space. */}
+              <SidebarInset className="h-screen-with-banner max-w-full min-w-0">
+                <AppContentWithRightDrawer>
+                  {children}
+                </AppContentWithRightDrawer>
+                {/* Toasts render in the `toast` overlay layer — the last layer
                       in LAYER_ORDER — so they paint above every overlay (incl. a
                       non-modal peek) by DOM order alone, no z-index. Sonner's
                       Toaster is position:fixed, so nesting it in the fixed
                       full-screen layer container is positionally identical. */}
-                  <Layer name="toast">
-                    <Toaster visibleToasts={1} />
-                  </Layer>
-                  <CommandMenu mainNavigation={navigation.navigation} />
-                  {/* Assistant window host lives here (not in PageHeader with
+                <Layer name="toast">
+                  <Toaster visibleToasts={1} />
+                </Layer>
+                <CommandMenu mainNavigation={navigation.navigation} />
+                {/* Assistant window host lives here (not in PageHeader with
                       its launcher button) so the open window and its geometry
                       survive route changes. */}
-                  <InAppAgentWindowHost />
-                </SidebarInset>
-              </div>
-              {hasFeaturePreviews ? (
-                <ControlledFeaturePreviewModal
-                  open={featurePreviewOpen}
-                  onOpenChange={setFeaturePreviewOpen}
-                />
-              ) : null}
+                <InAppAgentWindowHost />
+              </SidebarInset>
             </div>
-          </SidebarProvider>
-        </SidebarPresenceProvider>
-      </TopBannerProvider>
+            {hasFeaturePreviews ? (
+              <ControlledFeaturePreviewModal
+                open={featurePreviewOpen}
+                onOpenChange={setFeaturePreviewOpen}
+              />
+            ) : null}
+          </div>
+        </SidebarProvider>
+      </SidebarPresenceProvider>
     </>
   );
 }
@@ -280,7 +357,7 @@ function ConnectedAppSidebar({
 }) {
   const { isMobile } = useSidebar();
   const uiCustomization = useUiCustomization();
-  const v4UpgradeUiEnabled = useV4UpgradeUiEnabled();
+  const v4UpgradeUiEnabled = useV4UpgradeUiEnabled(routerProjectId);
   const plan = usePlan();
   const capture = usePostHogClientCapture();
   const session = useSession();

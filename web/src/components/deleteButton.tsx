@@ -1,3 +1,4 @@
+/* eslint-disable @repo/no-style-props, @repo/no-abstracted-overlay-trigger */
 import { useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import {
@@ -269,105 +270,20 @@ export function DeleteTraceButton(props: DeleteButtonProps) {
   );
 }
 
-export function DeleteDatasetButton(props: DeleteButtonProps) {
-  const utils = api.useUtils();
-  const {
-    itemId,
-    projectId,
-    scope = "datasets:CUD",
-    invalidateFunc = () => utils.datasets.invalidate(),
-  } = props;
-  const datasetMutation = api.datasets.deleteDataset.useMutation();
-  const executeDeleteMutation = async (onSuccess: () => void) => {
-    try {
-      await datasetMutation.mutateAsync({
-        datasetId: itemId,
-        projectId,
-      });
-    } catch (error) {
-      return Promise.reject(error);
-    }
-    onSuccess();
-  };
-  return (
-    <DeleteButton
-      {...props}
-      scope={scope}
-      invalidateFunc={invalidateFunc}
-      captureDeleteOpen={(capture, isTableAction) =>
-        capture("datasets:delete_form_open", {
-          source: isTableAction ? "table-single-row" : "dataset",
-        })
-      }
-      captureDeleteSuccess={(capture, isTableAction) =>
-        capture("datasets:delete_dataset_button_click", {
-          source: isTableAction ? "table-single-row" : "dataset",
-        })
-      }
-      entityToDeleteName="dataset"
-      executeDeleteMutation={executeDeleteMutation}
-      isDeleteMutationLoading={datasetMutation.isPending}
-    />
-  );
-}
-
-export function DeleteDashboardButton(props: DeleteButtonProps) {
-  const utils = api.useUtils();
-  const {
-    itemId,
-    projectId,
-    scope = "dashboards:CUD",
-    invalidateFunc = () => utils.dashboard.invalidate(),
-  } = props;
-  const dashboardMutation = api.dashboard.delete.useMutation();
-  const executeDeleteMutation = async (onSuccess: () => void) => {
-    try {
-      await dashboardMutation.mutateAsync({
-        dashboardId: itemId,
-        projectId,
-      });
-    } catch (error) {
-      return Promise.reject(error);
-    }
-    showSuccessToast({
-      title: "Dashboard deleted",
-      description: "The dashboard has been deleted successfully",
-    });
-    onSuccess();
-  };
-
-  return (
-    <DeleteButton
-      {...props}
-      scope={scope}
-      invalidateFunc={invalidateFunc}
-      captureDeleteOpen={(capture) =>
-        capture("dashboard:delete_dashboard_form_open")
-      }
-      captureDeleteSuccess={(capture) =>
-        capture("dashboard:delete_dashboard_button_click")
-      }
-      entityToDeleteName="dashboard"
-      executeDeleteMutation={executeDeleteMutation}
-      isDeleteMutationLoading={dashboardMutation.isPending}
-    />
-  );
-}
-
 /** DeleteMonitorButton deletes a monitor through the shared confirm-then-delete pattern. */
 export function DeleteMonitorButton(props: DeleteButtonProps) {
   const utils = api.useUtils();
   const {
     itemId,
     projectId,
-    scope = "monitors:CUD",
+    scope = "alerts:CUD",
     invalidateFunc = () => utils.monitors.invalidate(),
   } = props;
   const monitorMutation = api.monitors.delete.useMutation({
     onSuccess: () => {
       showSuccessToast({
-        title: "Monitor deleted",
-        description: "The monitor has been deleted successfully",
+        title: "Alert deleted",
+        description: "The alert has been deleted successfully",
       });
       utils.monitors.invalidate();
     },
@@ -397,8 +313,8 @@ export function DeleteMonitorButton(props: DeleteButtonProps) {
           source: isTableAction ? "table-single-row" : "monitor",
         })
       }
-      entityToDeleteName="monitor"
-      customDeletePrompt="This action cannot be undone. It stops all evaluations and removes the monitor's alert history."
+      entityToDeleteName="alert"
+      customDeletePrompt="This action cannot be undone. It stops all evaluations and removes its alert history."
       executeDeleteMutation={executeDeleteMutation}
       isDeleteMutationLoading={monitorMutation.isPending}
     />
@@ -410,7 +326,7 @@ export function DeleteEvalConfigButton(props: DeleteButtonProps) {
   const {
     itemId,
     projectId,
-    scope = "evalJob:CUD",
+    scope = "evaluationRule:CUD",
     invalidateFunc = () => utils.evals.invalidate(),
   } = props;
 

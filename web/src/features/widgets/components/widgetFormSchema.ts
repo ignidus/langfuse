@@ -1,15 +1,12 @@
 import { z } from "zod";
 import startCase from "lodash/startCase";
 
-import {
-  DashboardWidgetChartType,
-  singleFilter,
-  type FilterState,
-} from "@langfuse/shared";
+import { singleFilter, type FilterState } from "@langfuse/shared";
 import {
   getValidAggregationsForMeasureType,
+  getWidgetRequiredVersion,
   metricAggregations,
-  requiresV2,
+  resolveWidgetEditorVersion,
   viewDeclarations,
   views,
   type ViewVersion,
@@ -20,6 +17,7 @@ import {
   normalizeStoredWidgetFiltersForEditor,
 } from "@/src/features/dashboard/lib/dashboardUiTableToViewMapping";
 import { isTimeSeriesChart } from "@/src/features/widgets/chart-library/utils";
+import { dashboardWidgetChartTypeSchema } from "@/src/features/widgets/lib/dashboardWidgetChartTypes";
 import {
   buildWidgetDescription,
   buildWidgetName,
@@ -121,6 +119,30 @@ export function resolveAggregationAndChartType(params: {
 }
 
 /**
+ * resolveMeasureChangeAggregation picks the aggregation applied when the user
+ * switches the single-metric measure. A carried-over "count" — the only
+ * aggregation that gets auto-selected (via the default count measure) rather
+ * than deliberately chosen — jumps to the new measure's declared natural
+ * aggregation: e.g. count → toolCalls lands on "sum" (total tool calls), where
+ * keeping "count" would silently count observations with ≥1 tool call instead.
+ * Any other current aggregation is treated as deliberate and kept; validity
+ * healing runs in {@link normalizeWidgetFormValues}.
+ */
+export function resolveMeasureChangeAggregation(params: {
+  currentAggregation: z.infer<typeof metricAggregations>;
+  newMeasure: string;
+  view: z.infer<typeof views>;
+  viewVersion: ViewVersion;
+}): z.infer<typeof metricAggregations> {
+  const { currentAggregation, newMeasure, view, viewVersion } = params;
+  if (currentAggregation !== "count") return currentAggregation;
+  return (
+    viewDeclarations[viewVersion][view]?.measures?.[newMeasure]
+      ?.defaultAggregation ?? currentAggregation
+  );
+}
+
+/**
  * A single measure + aggregation pair, matching the save payload's `metrics[]`
  * element (minus the string `agg` alias). `measure` is intentionally NOT
  * `.min(1)`: a pivot table may carry a trailing empty "Add Metric" slot that the
@@ -167,7 +189,7 @@ export function makeWidgetFormSchema(viewVersion: ViewVersion) {
       metrics: z.array(MetricFieldSchema).min(1),
       dimensions: z.array(z.object({ field: z.string() })),
       chart: z.object({
-        type: z.enum(DashboardWidgetChartType),
+        type: dashboardWidgetChartTypeSchema,
         bins: z.coerce.number().int().min(1).max(100),
         rowLimit: z.coerce.number().int().min(0).max(1000),
         sort: SortFieldSchema.nullable(),
@@ -329,7 +351,7 @@ export type WidgetSavePayload = {
 export function deriveWidgetBaseMinVersion(
   initialValues: WidgetInitialValues,
 ): number {
-  return requiresV2({
+  const requiredVersion = getWidgetRequiredVersion({
     view: initialValues.view,
     dimensions:
       initialValues.dimensions ??
@@ -340,40 +362,38 @@ export function deriveWidgetBaseMinVersion(
       measure: metric.measure,
     })) ?? [{ measure: initialValues.measure }],
     filters: initialValues.filters ?? [],
-  })
-    ? 2
-    : (initialValues.minVersion ?? 1);
+  });
+
+  return requiredVersion === 2 ? 2 : (initialValues.minVersion ?? 1);
 }
 
 /**
- * Derives the effective view version (query-engine v1/v2) from the current view,
- * selected query shape, frozen initial hint, and beta flag. The persisted value
- * is a local hint only; shape-required v2 is always promoted.
+ * Adapts editor-space form values to the canonical widget query shape and
+ * resolves the active editor declaration. Persistence remains server-owned.
  */
-export function resolveWidgetViewVersion(params: {
+export function resolveWidgetFormVersion(params: {
   view: z.infer<typeof views>;
   baseMinVersion: number;
-  isBetaEnabled: boolean;
+  activeVersion: ViewVersion;
   shape?: {
     dimensions: { field: string }[];
     metrics: { measure: string }[];
     filters?: FilterState;
   };
 }): ViewVersion {
-  const shapeRequiresV2 = requiresV2({
-    view: params.view,
-    dimensions: params.shape?.dimensions ?? [],
-    measures: params.shape?.metrics ?? [],
-    filters: mapWidgetUiTableFilterToView(
-      params.view,
-      params.shape?.filters ?? [],
-    ),
+  return resolveWidgetEditorVersion({
+    shape: {
+      view: params.view,
+      dimensions: params.shape?.dimensions ?? [],
+      measures: params.shape?.metrics ?? [],
+      filters: mapWidgetUiTableFilterToView(
+        params.view,
+        params.shape?.filters ?? [],
+      ),
+    },
+    baseMinVersion: params.baseMinVersion,
+    activeVersion: params.activeVersion,
   });
-  return shapeRequiresV2 ||
-    params.baseMinVersion >= 2 ||
-    (params.isBetaEnabled && params.view !== "traces")
-    ? "v2"
-    : "v1";
 }
 
 /** Sanitized pivot default sort for the current metric/dimension selection, or undefined when the stored sort no longer applies. */
@@ -724,6 +744,7 @@ export function deriveSaveReason(
   const chartTypeError: string | undefined = errors.chart?.type?.message;
   const metricsError: string | undefined =
     errors.metrics?.message ??
+    errors.metrics?.root?.message ??
     errors.metrics?.[0]?.measure?.message ??
     errors.metrics?.[0]?.aggregation?.message;
   const dimensionsError: string | undefined = errors.dimensions?.message;
