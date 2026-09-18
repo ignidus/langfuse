@@ -1072,14 +1072,12 @@ class S3StorageService implements StorageService {
           Bucket: this.bucketName,
           Key: path,
           ContentType: contentType,
-          ChecksumSHA256: sha256Hash,
           ContentLength: contentLength,
         }),
       ),
       {
         expiresIn: ttlSeconds,
         signableHeaders: new Set(["content-type", "content-length"]),
-        unhoistableHeaders: new Set(["x-amz-checksum-sha256"]),
       },
     );
   }
