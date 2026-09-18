@@ -1072,12 +1072,11 @@ class S3StorageService implements StorageService {
           Bucket: this.bucketName,
           Key: path,
           ContentType: contentType,
-          ContentLength: contentLength,
         }),
       ),
       {
         expiresIn: ttlSeconds,
-        signableHeaders: new Set(["content-type", "content-length"]),
+        signableHeaders: new Set(["content-type"]),
       },
     );
   }
