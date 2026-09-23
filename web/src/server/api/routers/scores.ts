@@ -1183,4 +1183,79 @@ export const scoresRouter = createTRPCRouter({
     .query(async ({ input }) => {
       return (await getScoreMetadataById(input.projectId, input.id)) ?? null;
     }),
+  fieldReview: protectedProjectProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        traceId: z.string(),
+      }),
+    )
+    .query(async ({ input, ctx }) => {
+      // Get the trace to access its metadata
+      const trace = await getTraceById({
+        projectId: input.projectId,
+        traceId: input.traceId,
+      });
+
+      if (!trace) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `No trace with id ${input.traceId} in project ${input.projectId}`,
+        });
+      }
+
+      // Get all scores for this trace that start with "ah_field_"
+      const scores = await getScoresUiTable({
+        projectId: input.projectId,
+        filter: [
+          {
+            column: "name",
+            type: "string",
+            operator: "like",
+            value: "ah_field_%",
+          },
+          {
+            column: "trace_id",
+            type: "string",
+            operator: "=",
+            value: input.traceId,
+          },
+        ],
+        orderBy: [{ column: "timestamp", direction: "DESC" }],
+        limit: 10000,
+        offset: 0,
+        excludeMetadata: false,
+        includeHasMetadataFlag: false,
+      });
+
+      // Extract Workato Job ID from trace metadata if available
+      const workatorJobId =
+        (trace.metadata as Record<string, unknown> | null)?.workato_job_id ||
+        (trace.metadata as Record<string, unknown> | null)?.[
+          "workato_job_id"
+        ] ||
+        null;
+
+      // Transform scores to table format
+      const tableData = scores
+        .filter((score) => score.name.startsWith("ah_field_"))
+        .map((score) => {
+          const metadata = score.metadata as Record<string, unknown> | null;
+          const fieldName = score.name.replace("ah_field_", "");
+
+          return {
+            id: score.id,
+            workatorJobId: workatorJobId,
+            field: fieldName || score.name,
+            workatorValue: (metadata?.workato_value as string | null) || null,
+            originalPdfValue:
+              (metadata?.original_pdf_value as string | null) || null,
+            result: score.string_value || "unknown",
+            evaluatorReason: score.comment || null,
+            timestamp: score.timestamp,
+          };
+        });
+
+      return tableData;
+    }),
 });
