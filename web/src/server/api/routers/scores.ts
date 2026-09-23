@@ -1230,11 +1230,7 @@ export const scoresRouter = createTRPCRouter({
 
       // Extract Workato Job ID from trace metadata if available
       const workatoJobId =
-        (trace.metadata as Record<string, unknown> | null)?.workato_job_id ||
-        (trace.metadata as Record<string, unknown> | null)?.[
-          "workato_job_id"
-        ] ||
-        null;
+        (trace.metadata as Record<string, unknown> | null)?.workato_job_id || null;
 
       // Transform scores to table format
       const tableData = scores
