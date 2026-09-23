@@ -15,7 +15,7 @@ export type FieldReviewRow = {
   originalPdfValue: string | null;
   result: string;
   evaluatorReason: string | null;
-  timestamp: Date;
+  timestamp: string;
 };
 
 type ResultFilter = "all" | "correct" | "needs_review" | "incorrect";
@@ -93,7 +93,7 @@ export function FieldReviewTable({
           if (normalized === "correct") return "completed";
           if (normalized === "needs_review") return "pending";
           if (normalized === "incorrect") return "error";
-          return "partial" as any;
+          return undefined;
         },
       }),
       createTextTableColumn({
