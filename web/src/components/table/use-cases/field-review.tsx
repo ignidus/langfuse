@@ -56,7 +56,7 @@ export function FieldReviewTable({
       createTextTableColumn({
         header: "Workato Job ID",
         accessorKey: "workatoJobId",
-        cell: (value) => value || <span className="text-muted-foreground">—</span>,
+        mapValue: (value) => value || undefined,
       }),
       createTextTableColumn({
         header: "Field",
@@ -65,22 +65,12 @@ export function FieldReviewTable({
       createTextTableColumn({
         header: "Workato extracted value",
         accessorKey: "workatoValue",
-        cell: (value) =>
-          value ? (
-            <span className="font-mono text-xs">{value}</span>
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          ),
+        mapValue: (value) => value || undefined,
       }),
       createTextTableColumn({
         header: "Original PDF evidence",
         accessorKey: "originalPdfValue",
-        cell: (value) =>
-          value ? (
-            <span className="font-mono text-xs">{value}</span>
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          ),
+        mapValue: (value) => value || undefined,
       }),
       createStatusTableColumn({
         header: "Result",
@@ -99,12 +89,7 @@ export function FieldReviewTable({
       createTextTableColumn({
         header: "Evaluator reason / PDF page reference",
         accessorKey: "evaluatorReason",
-        cell: (value) =>
-          value ? (
-            <span className="text-xs">{value}</span>
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          ),
+        mapValue: (value) => value || undefined,
       }),
     ],
     [],
