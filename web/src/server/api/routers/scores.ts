@@ -1190,7 +1190,7 @@ export const scoresRouter = createTRPCRouter({
         traceId: z.string(),
       }),
     )
-    .query(async ({ input, ctx }) => {
+    .query(async ({ input }) => {
       // Get the trace to access its metadata
       const trace = await getTraceById({
         projectId: input.projectId,
@@ -1211,8 +1211,8 @@ export const scoresRouter = createTRPCRouter({
           {
             column: "name",
             type: "string",
-            operator: "like",
-            value: "ah_field_%",
+            operator: "starts with",
+            value: "ah_field_",
           },
           {
             column: "trace_id",
@@ -1221,7 +1221,7 @@ export const scoresRouter = createTRPCRouter({
             value: input.traceId,
           },
         ],
-        orderBy: [{ column: "timestamp", direction: "DESC" }],
+        orderBy: { column: "timestamp", order: "DESC" },
         limit: 10000,
         offset: 0,
         excludeMetadata: false,
@@ -1230,7 +1230,7 @@ export const scoresRouter = createTRPCRouter({
 
       // Extract Workato Job ID from trace metadata if available
       const workatoJobId =
-        (trace.metadata as Record<string, unknown> | null)?.workato_job_id || null;
+        String((trace.metadata as Record<string, unknown> | null)?.workato_job_id ?? "") || null;
 
       // Transform scores to table format
       const tableData = scores
@@ -1246,9 +1246,9 @@ export const scoresRouter = createTRPCRouter({
             workatoValue: (metadata?.workato_value as string | null) || null,
             originalPdfValue:
               (metadata?.original_pdf_value as string | null) || null,
-            result: score.string_value || "unknown",
+            result: score.stringValue || "unknown",
             evaluatorReason: score.comment || null,
-            timestamp: score.timestamp,
+            timestamp: String(score.timestamp),
           };
         });
 
