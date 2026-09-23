@@ -72,7 +72,7 @@ export function FieldReviewTable({
         accessorKey: "originalPdfValue",
         mapValue: (value) => value || undefined,
       }),
-      createStatusTableColumn({
+      createStatusTableColumn<FieldReviewRow, string>({
         header: "Result",
         accessorKey: "result",
         getStatus: (value) => {
