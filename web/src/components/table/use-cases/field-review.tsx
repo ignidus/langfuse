@@ -148,9 +148,7 @@ export function FieldReviewTable({
                 {
                   fieldReviewData.filter((row) => {
                     if (filter.value === "all") return true;
-                    const normalized = row.result
-                      .toLowerCase()
-                      .replace(/_/g, "_");
+                    const normalized = row.result.toLowerCase();
                     const normalizedFilter = filter.value
                       .toLowerCase()
                       .replace(/-/g, "_");

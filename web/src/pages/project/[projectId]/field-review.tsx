@@ -1,6 +1,5 @@
 import { useRouter } from "next/router";
 import Page from "@/src/components/layouts/page";
-import { api } from "@/src/utils/api";
 import { FieldReviewTable } from "@/src/components/table/use-cases/field-review";
 
 export default function FieldReviewPage() {
