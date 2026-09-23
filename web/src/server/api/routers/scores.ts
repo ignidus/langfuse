@@ -1215,7 +1215,7 @@ export const scoresRouter = createTRPCRouter({
             value: "ah_field_",
           },
           {
-            column: "trace_id",
+            column: "traceId",
             type: "string",
             operator: "=",
             value: input.traceId,
