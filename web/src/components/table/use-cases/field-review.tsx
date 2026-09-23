@@ -9,9 +9,9 @@ import {
 
 export type FieldReviewRow = {
   id: string;
-  workatorJobId: string | null;
+  workatoJobId: string | null;
   field: string;
-  workatorValue: string | null;
+  workatoValue: string | null;
   originalPdfValue: string | null;
   result: string;
   evaluatorReason: string | null;
@@ -44,9 +44,7 @@ export function FieldReviewTable({
     }
 
     return fieldReviewData.filter((row) => {
-      const normalizedResult = row.result
-        .toLowerCase()
-        .replace(/_/g, "_") as string;
+      const normalizedResult = row.result.toLowerCase() as string;
       const normalizedFilter = resultFilter.toLowerCase().replace(/-/g, "_");
       return normalizedResult === normalizedFilter;
     });
@@ -57,7 +55,7 @@ export function FieldReviewTable({
     () => [
       createTextTableColumn({
         header: "Workato Job ID",
-        accessorKey: "workatorJobId",
+        accessorKey: "workatoJobId",
         cell: (value) => value || <span className="text-muted-foreground">—</span>,
       }),
       createTextTableColumn({
@@ -66,7 +64,7 @@ export function FieldReviewTable({
       }),
       createTextTableColumn({
         header: "Workato extracted value",
-        accessorKey: "workatorValue",
+        accessorKey: "workatoValue",
         cell: (value) =>
           value ? (
             <span className="font-mono text-xs">{value}</span>

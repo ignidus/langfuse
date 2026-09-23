@@ -1229,7 +1229,7 @@ export const scoresRouter = createTRPCRouter({
       });
 
       // Extract Workato Job ID from trace metadata if available
-      const workatorJobId =
+      const workatoJobId =
         (trace.metadata as Record<string, unknown> | null)?.workato_job_id ||
         (trace.metadata as Record<string, unknown> | null)?.[
           "workato_job_id"
@@ -1245,9 +1245,9 @@ export const scoresRouter = createTRPCRouter({
 
           return {
             id: score.id,
-            workatorJobId: workatorJobId,
+            workatoJobId: workatoJobId,
             field: fieldName || score.name,
-            workatorValue: (metadata?.workato_value as string | null) || null,
+            workatoValue: (metadata?.workato_value as string | null) || null,
             originalPdfValue:
               (metadata?.original_pdf_value as string | null) || null,
             result: score.string_value || "unknown",
