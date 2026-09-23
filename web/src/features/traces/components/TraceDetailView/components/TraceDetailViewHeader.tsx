@@ -10,6 +10,7 @@
  */
 
 import { memo, useMemo } from "react";
+import Link from "next/link";
 import {
   type TraceDomain,
   type ScoreDomain,
@@ -175,6 +176,15 @@ export const TraceDetailViewHeader = memo(function TraceDetailViewHeader({
                 forceMount
                 className="flex w-auto min-w-44 flex-col gap-0.5 p-1 data-[state=closed]:hidden"
               >
+                <Link
+                  href={`/project/${projectId}/field-review?traceId=${encodeURIComponent(trace.id)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Button variant="ghost" size="sm" className="w-full justify-start">
+                    <span className="text-sm">Field Review</span>
+                  </Button>
+                </Link>
                 <NewDatasetItemFromExistingObjectDialogController
                   projectId={projectId}
                 >
@@ -325,6 +335,15 @@ export const TraceDetailViewHeader = memo(function TraceDetailViewHeader({
         {/* Action buttons (desktop inline cluster) */}
         {!isMobile && (
           <div className="flex h-full flex-wrap content-start items-start justify-start gap-0.5 @2xl:mr-1 @2xl:justify-end">
+            <Link
+              href={`/project/${projectId}/field-review?traceId=${encodeURIComponent(trace.id)}`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Button variant="secondary" size="sm" className="gap-1">
+                <span>Field Review</span>
+              </Button>
+            </Link>
             <NewDatasetItemFromExistingObjectDialogController
               projectId={projectId}
               key={trace.id}
