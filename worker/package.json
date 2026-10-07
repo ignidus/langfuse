@@ -37,6 +37,7 @@
     "@repo/langfuse-skills": "workspace:*",
     "@appsignal/opentelemetry-instrumentation-bullmq": "^0.8.0",
     "@langfuse/shared": "workspace:*",
+    "@aws-sdk/client-lambda": "catalog:",
     "@aws-sdk/client-lambda-microvms": "catalog:",
     "@mastra/core": "1.46.0",
     "@mastra/mcp": "1.8.1",

@@ -1,3 +1,4 @@
+import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { z } from "zod";
 import {
   DEFAULT_TRACE_ENVIRONMENT,
@@ -37,6 +38,14 @@ import { runLLMAsJudgeEvaluation } from "../evalService";
 import { executeCodeBasedEvaluation } from "../codeBased";
 import { getEvalS3StorageClient } from "../s3StorageClient";
 import { type ObservationForEval } from "./types";
+import { env } from "../../../env";
+
+const ahFieldScoreLambdaClient = new LambdaClient({
+  requestHandler: {
+    requestTimeout: 10_000,
+    throwOnRequestTimeout: true,
+  },
+});
 
 /**
  * Dependencies for processing observation evals.
@@ -284,6 +293,15 @@ export async function processObservationEval(
     environment: executionParams.environment,
     deps: executionParams.deps,
     result: executionResult,
+  });
+
+  // Non-blocking async invoke for the Allied Health field evaluator.
+  void notifyAhFieldEvaluatorLambda({
+    traceId: executionParams.job.jobInputTraceId,
+    observationId: executionParams.job.jobInputObservationId,
+    environment: executionParams.environment,
+    evaluatorId: resolved.type === "v2" ? resolved.evaluatorId : template.id,
+    evaluatorName: template.name,
   });
 
   return "completed";
@@ -537,4 +555,75 @@ function buildV2Execution(params: {
     evaluatorId: evaluator.id,
     evaluatorVersionId: version.id,
   };
+}
+
+/**
+ * Non-blocking invocation of the Allied Health field score processor.
+ * The Lambda reads the completed evaluator result from Langfuse.
+ * Logs failures but does not throw, ensuring evaluator completion is unaffected.
+ */
+async function notifyAhFieldEvaluatorLambda({
+  traceId,
+  observationId,
+  environment,
+  evaluatorId,
+  evaluatorName,
+}: {
+  traceId: string | null;
+  observationId: string | null;
+  environment: string;
+  evaluatorId: string;
+  evaluatorName: string;
+}): Promise<void> {
+  const functionName = env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME;
+
+  if (!functionName) {
+    return;
+  }
+
+  // Determine if this evaluator is the Allied Health field-level evaluator
+  const configuredEvaluatorId = env.AH_FIELD_EVALUATOR_ID;
+  const configuredEvaluatorName = env.AH_FIELD_EVALUATOR_NAME;
+
+  if (configuredEvaluatorId) {
+    if (evaluatorId !== configuredEvaluatorId) {
+      return;
+    }
+  } else if (configuredEvaluatorName) {
+    if (evaluatorName !== configuredEvaluatorName) {
+      return;
+    }
+  } else {
+    return;
+  }
+
+  try {
+    await ahFieldScoreLambdaClient.send(
+      new InvokeCommand({
+        FunctionName: functionName,
+        InvocationType: "Event",
+        Payload: Buffer.from(
+          JSON.stringify({
+            trace_id: traceId,
+            observation_id: observationId,
+            environment:
+              environment === "default" ? "development" : environment,
+            evaluator_score_name: evaluatorName,
+            write_scores: true,
+          }),
+        ),
+      }),
+    );
+  } catch (error) {
+    logger.warn(
+      `Failed to invoke AH field evaluator Lambda: ${error instanceof Error ? error.message : String(error)}`,
+      {
+        traceId,
+        observationId,
+        evaluatorId,
+        evaluatorName,
+        error: error instanceof Error ? error.stack : undefined,
+      },
+    );
+  }
 }

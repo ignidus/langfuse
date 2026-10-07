@@ -698,6 +698,11 @@ const EnvSchema = z.object({
     .default(2),
   LANGFUSE_QUEUE_METRICS_INTERVAL_MS: z.coerce.number().min(100).default(1000),
   LANGFUSE_QUEUE_METRICS_ENABLED: z.enum(["true", "false"]).default("true"),
+
+  // Allied Health field-level evaluator Lambda integration
+  AH_FIELD_EVALUATOR_ID: z.string().optional(),
+  AH_FIELD_EVALUATOR_NAME: z.string().optional(),
+  AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME: z.string().optional(),
 });
 
 type ParsedEnv = z.infer<typeof EnvSchema>;
