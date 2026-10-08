@@ -1337,7 +1337,10 @@ describe("processObservationEval", () => {
       vi.resetModules();
     });
 
-    const setupLambdaEval = async (evaluatorName: string) => {
+    const setupLambdaEval = async (
+      evaluatorName: string,
+      scoreComment?: string,
+    ) => {
       vi.resetModules();
       const [
         { processObservationEval: processEval },
@@ -1377,7 +1380,17 @@ describe("processObservationEval", () => {
 
       (processorPrisma.jobExecution.findFirst as Mock).mockResolvedValue(job);
       mockMigratedAssignment(config, processorPrisma);
-      (runEvaluation as Mock).mockResolvedValue(mockEvalExecutionResult);
+      (runEvaluation as Mock).mockResolvedValue(
+        scoreComment === undefined
+          ? mockEvalExecutionResult
+          : {
+              ...mockEvalExecutionResult,
+              scores: mockEvalExecutionResult.scores.map((score) => ({
+                ...score,
+                comment: scoreComment,
+              })),
+            },
+      );
 
       const deps = createMockProcessorDeps({
         downloadObservationFromS3: vi
@@ -1418,8 +1431,12 @@ describe("processObservationEval", () => {
       process.env.AH_FIELD_EVALUATOR_ID = "evaluator-ah-fields-123";
       process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
         "allied-health-field-score-exploder-dev";
+      const evaluatorJson = JSON.stringify({
+        fields: [{ name: "patient_name", value: "Ada Lovelace" }],
+      });
       const { processEval, deps } = await setupLambdaEval(
         "AH Field Accuracy - Submission Identity & Contact",
+        evaluatorJson,
       );
 
       const { command, payload } = await invokeAndReadCommand(processEval, deps);
@@ -1436,7 +1453,22 @@ describe("processObservationEval", () => {
         evaluator_score_name:
           "AH Field Accuracy - Submission Identity & Contact",
         write_scores: true,
+        evaluator_json: evaluatorJson,
       });
+    });
+
+    it("omits evaluator_json when no score comment contains fields", async () => {
+      process.env.AH_FIELD_EVALUATOR_ID = "evaluator-ah-fields-123";
+      process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
+        "allied-health-field-score-exploder-dev";
+      const { processEval, deps } = await setupLambdaEval(
+        "AH Field Accuracy - Submission Identity & Contact",
+      );
+
+      const { payload } = await invokeAndReadCommand(processEval, deps);
+
+      expect(lambdaSendMock).toHaveBeenCalledTimes(1);
+      expect(payload).not.toHaveProperty("evaluator_json");
     });
 
     it("uses the configured evaluator name only when no ID is configured", async () => {

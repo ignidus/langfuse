@@ -302,6 +302,7 @@ export async function processObservationEval(
     environment: executionParams.environment,
     evaluatorId: resolved.type === "v2" ? resolved.evaluatorId : template.id,
     evaluatorName: template.name,
+    scores: executionResult.scores,
   });
 
   return "completed";
@@ -568,12 +569,14 @@ async function notifyAhFieldEvaluatorLambda({
   environment,
   evaluatorId,
   evaluatorName,
+  scores,
 }: {
   traceId: string | null;
   observationId: string | null;
   environment: string;
   evaluatorId: string;
   evaluatorName: string;
+  scores: EvalExecutionResult["scores"];
 }): Promise<void> {
   const functionName = env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME;
 
@@ -597,6 +600,10 @@ async function notifyAhFieldEvaluatorLambda({
     return;
   }
 
+  const evaluatorJson = scores.find((score) =>
+    score.comment?.includes("fields"),
+  )?.comment;
+
   try {
     await ahFieldScoreLambdaClient.send(
       new InvokeCommand({
@@ -610,6 +617,7 @@ async function notifyAhFieldEvaluatorLambda({
               environment === "default" ? "development" : environment,
             evaluator_score_name: evaluatorName,
             write_scores: true,
+            ...(evaluatorJson ? { evaluator_json: evaluatorJson } : {}),
           }),
         ),
       }),
