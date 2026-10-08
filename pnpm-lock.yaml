@@ -1058,6 +1058,9 @@ importers:
       '@appsignal/opentelemetry-instrumentation-bullmq':
         specifier: ^0.8.0
         version: 0.8.0(bullmq@5.76.3(supports-color@8.1.1))(supports-color@8.1.1)
+      '@aws-sdk/client-lambda':
+        specifier: 'catalog:'
+        version: 3.1074.0
       '@aws-sdk/client-lambda-microvms':
         specifier: 'catalog:'
         version: 3.1074.0

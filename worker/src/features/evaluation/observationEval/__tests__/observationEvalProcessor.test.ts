@@ -1,4 +1,12 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import {
+  afterEach,
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  type Mock,
+} from "vitest";
 import {
   EvalTemplateSourceCodeLanguage,
   EvalTemplateType,
@@ -17,6 +25,17 @@ import {
   createMockProcessorDeps,
 } from "./fixtures";
 import { UnrecoverableError } from "../../../../errors/UnrecoverableError";
+
+const lambdaSendMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@aws-sdk/client-lambda", () => ({
+  LambdaClient: class {
+    send = lambdaSendMock;
+  },
+  InvokeCommand: class {
+    constructor(public readonly input: unknown) {}
+  },
+}));
 
 // Mock prisma
 vi.mock("@langfuse/shared/src/db", async () => {
@@ -117,6 +136,7 @@ describe("processObservationEval", () => {
 
   const mockMigratedAssignment = (
     config: ReturnType<typeof createMockJobConfiguration>,
+    prismaInstance: typeof prisma = prisma,
   ) => {
     const template = config.evalTemplate;
     if (!template) throw new Error("Test evaluator template is required");
@@ -167,7 +187,7 @@ describe("processObservationEval", () => {
       evaluator,
     };
     (
-      prisma.evaluationRuleEvaluatorAssignment.findFirst as Mock
+      prismaInstance.evaluationRuleEvaluatorAssignment.findFirst as Mock
     ).mockResolvedValue(assignment);
     return assignment;
   };
@@ -1299,4 +1319,218 @@ describe("processObservationEval", () => {
       expect(runLLMAsJudgeEvaluation).toHaveBeenCalledTimes(1);
     });
   });
-});
+
+  describe("AH field evaluator Lambda integration", () => {
+    let originalEnv: NodeJS.ProcessEnv;
+
+    beforeEach(() => {
+      originalEnv = { ...process.env };
+      delete process.env.AH_FIELD_EVALUATOR_ID;
+      delete process.env.AH_FIELD_EVALUATOR_NAME;
+      delete process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME;
+      lambdaSendMock.mockReset();
+      lambdaSendMock.mockResolvedValue({});
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+      vi.resetModules();
+    });
+
+    const setupLambdaEval = async (evaluatorName: string) => {
+      vi.resetModules();
+      const [
+        { processObservationEval: processEval },
+        { prisma: processorPrisma },
+        { runLLMAsJudgeEvaluation: runEvaluation },
+      ] = await Promise.all([
+        import("../observationEvalProcessor"),
+        import("@langfuse/shared/src/db"),
+        import("../../evalService"),
+      ]);
+
+      const template = createMockEvalTemplate({
+        id: "evaluator-ah-fields-123",
+        projectId,
+        name: evaluatorName,
+      });
+      const config = createMockJobConfiguration({
+        id: "config-123",
+        projectId,
+        evalTemplateId: template.id,
+        evalTemplate: template,
+      });
+      const job = createMockJobExecution({
+        id: jobExecutionId,
+        projectId,
+        status: JobExecutionStatus.PENDING,
+        jobConfigurationId: config.id,
+        jobInputTraceId: "trace-abc",
+        jobInputObservationId: "obs-xyz",
+      });
+      const observation = createTestObservation({
+        span_id: "obs-xyz",
+        project_id: projectId,
+        trace_id: "trace-abc",
+        environment: "default",
+      });
+
+      (processorPrisma.jobExecution.findFirst as Mock).mockResolvedValue(job);
+      mockMigratedAssignment(config, processorPrisma);
+      (runEvaluation as Mock).mockResolvedValue(mockEvalExecutionResult);
+
+      const deps = createMockProcessorDeps({
+        downloadObservationFromS3: vi
+          .fn()
+          .mockResolvedValue(JSON.stringify(observation)),
+      });
+
+      return { processEval, deps };
+    };
+
+    const invokeAndReadCommand = async (
+      processEval: typeof processObservationEval,
+      deps: ReturnType<typeof createMockProcessorDeps>,
+    ) => {
+      await processEval({
+        event: baseEvent,
+        executionType: EvalTemplateType.LLM_AS_JUDGE,
+        deps,
+      });
+
+      const command = lambdaSendMock.mock.calls[0]?.[0] as {
+        input: {
+          FunctionName: string;
+          InvocationType: string;
+          Payload: Uint8Array;
+        };
+      };
+
+      return {
+        command: command?.input,
+        payload: command?.input.Payload
+          ? JSON.parse(Buffer.from(command.input.Payload).toString("utf8"))
+          : undefined,
+      };
+    };
+
+    it("invokes Lambda once for a configured evaluator ID match", async () => {
+      process.env.AH_FIELD_EVALUATOR_ID = "evaluator-ah-fields-123";
+      process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
+        "allied-health-field-score-exploder-dev";
+      const { processEval, deps } = await setupLambdaEval(
+        "AH Field Accuracy - Submission Identity & Contact",
+      );
+
+      const { command, payload } = await invokeAndReadCommand(processEval, deps);
+
+      expect(lambdaSendMock).toHaveBeenCalledTimes(1);
+      expect(command).toMatchObject({
+        FunctionName: "allied-health-field-score-exploder-dev",
+        InvocationType: "Event",
+      });
+      expect(payload).toEqual({
+        trace_id: "trace-abc",
+        observation_id: "obs-xyz",
+        environment: "development",
+        evaluator_score_name:
+          "AH Field Accuracy - Submission Identity & Contact",
+        write_scores: true,
+      });
+    });
+
+    it("uses the configured evaluator name only when no ID is configured", async () => {
+      process.env.AH_FIELD_EVALUATOR_NAME = "AH Field-Level Evaluator";
+      process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
+        "allied-health-field-score-exploder-dev";
+      const { processEval, deps } = await setupLambdaEval(
+        "AH Field-Level Evaluator",
+      );
+
+      await processEval({
+        event: baseEvent,
+        executionType: EvalTemplateType.LLM_AS_JUDGE,
+        deps,
+      });
+
+      expect(lambdaSendMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not invoke when a configured ID mismatches, even if the name matches", async () => {
+      process.env.AH_FIELD_EVALUATOR_ID = "another-evaluator-id";
+      process.env.AH_FIELD_EVALUATOR_NAME = "AH Field-Level Evaluator";
+      process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
+        "allied-health-field-score-exploder-dev";
+      const { processEval, deps } = await setupLambdaEval(
+        "AH Field-Level Evaluator",
+      );
+
+      await processEval({
+        event: baseEvent,
+        executionType: EvalTemplateType.LLM_AS_JUDGE,
+        deps,
+      });
+
+      expect(lambdaSendMock).not.toHaveBeenCalled();
+    });
+
+    it("does not invoke when the Lambda function name is missing", async () => {
+      process.env.AH_FIELD_EVALUATOR_ID = "evaluator-ah-fields-123";
+      const { processEval, deps } = await setupLambdaEval(
+        "AH Field-Level Evaluator",
+      );
+
+      await processEval({
+        event: baseEvent,
+        executionType: EvalTemplateType.LLM_AS_JUDGE,
+        deps,
+      });
+
+      expect(lambdaSendMock).not.toHaveBeenCalled();
+    });
+
+    it("does not invoke when neither evaluator ID nor name is configured", async () => {
+      process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
+        "allied-health-field-score-exploder-dev";
+      const { processEval, deps } = await setupLambdaEval(
+        "AH Field-Level Evaluator",
+      );
+
+      await processEval({
+        event: baseEvent,
+        executionType: EvalTemplateType.LLM_AS_JUDGE,
+        deps,
+      });
+
+      expect(lambdaSendMock).not.toHaveBeenCalled();
+    });
+
+    it("logs a rejected Lambda send without failing evaluator completion", async () => {
+      process.env.AH_FIELD_EVALUATOR_ID = "evaluator-ah-fields-123";
+      process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
+        "allied-health-field-score-exploder-dev";
+      lambdaSendMock.mockRejectedValue(new Error("Lambda invoke failed"));
+      const { processEval, deps } = await setupLambdaEval(
+        "AH Field-Level Evaluator",
+      );
+
+      await expect(
+        processEval({
+          event: baseEvent,
+          executionType: EvalTemplateType.LLM_AS_JUDGE,
+          deps,
+        }),
+      ).resolves.toBe("completed");
+
+      const { logger } = await import("@langfuse/shared/src/server");
+      await vi.waitFor(() => {
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining("Failed to invoke AH field evaluator Lambda"),
+          expect.objectContaining({
+            traceId: "trace-abc",
+            observationId: "obs-xyz",
+          }),
+        );
+      });
+    });
+  });
