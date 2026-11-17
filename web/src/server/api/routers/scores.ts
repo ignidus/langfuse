@@ -62,7 +62,7 @@ import {
   deleteScores,
   getTracesIdentifierForSession,
   validateConfigAgainstBody,
-  getTracesTable,
+  getTracesTableMetrics,
 } from "@langfuse/shared/src/server";
 import { v4 } from "uuid";
 import { throwIfNoEntitlement } from "@/src/features/entitlements/server/hasEntitlement";
@@ -1278,7 +1278,10 @@ export const scoresRouter = createTRPCRouter({
           const metadata = score.metadata as Record<string, unknown> | null;
           const fieldName = score.name.replace("ah_field_", "");
           const fieldCategory = metadata?.field_category;
-          const category =
+          const category:
+            | "identity_contact"
+            | "coverage_claims_documents"
+            | "operations_class_staffing" =
             fieldCategory === "coverage_claims_documents" ||
             fieldCategory === "operations_class_staffing"
               ? fieldCategory
@@ -1343,26 +1346,24 @@ export const scoresRouter = createTRPCRouter({
 
       if (latestScore.executionTraceId) {
         try {
-          const executionTraces = await getTracesTable({
+          const executionTraces = await getTracesTableMetrics({
             projectId: input.projectId,
             filter: [
               {
-                column: "id",
-                type: "string",
-                operator: "=",
-                value: latestScore.executionTraceId,
+                type: "stringOptions",
+                operator: "any of",
+                column: "ID",
+                value: [latestScore.executionTraceId],
               },
             ],
             orderBy: { column: "timestamp", order: "DESC" },
-            limit: 1,
           });
 
           const executionTrace = executionTraces[0];
           if (executionTrace) {
             durationMs = executionTrace.latency ?? null;
-            if (executionTrace.calculatedTotalCost) {
-              estimatedCostUsd = executionTrace.calculatedTotalCost.toNumber();
-            }
+            estimatedCostUsd =
+              executionTrace.calculatedTotalCost?.toNumber() ?? null;
           }
         } catch (error) {
           logger.warn(
