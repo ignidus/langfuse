@@ -584,25 +584,61 @@ async function notifyAhFieldEvaluatorLambda({
     return;
   }
 
-  // Determine if this evaluator is the Allied Health field-level evaluator
-  const configuredEvaluatorId = env.AH_FIELD_EVALUATOR_ID;
-  const configuredEvaluatorName = env.AH_FIELD_EVALUATOR_NAME;
+  const routes = [
+    {
+      evaluatorId: env.AH_FIELD_EVALUATOR_ID,
+      evaluatorName: env.AH_FIELD_EVALUATOR_NAME,
+      fieldCategory: undefined,
+    },
+    {
+      evaluatorId: env.AH_COVERAGE_FIELD_EVALUATOR_ID,
+      evaluatorName: env.AH_COVERAGE_FIELD_EVALUATOR_NAME,
+      fieldCategory: "coverage_claims_documents",
+    },
+    {
+      evaluatorId: env.AH_OPERATIONS_FIELD_EVALUATOR_ID,
+      evaluatorName: env.AH_OPERATIONS_FIELD_EVALUATOR_NAME,
+      fieldCategory: "operations_class_staffing",
+    },
+  ] as const;
 
-  if (configuredEvaluatorId) {
-    if (evaluatorId !== configuredEvaluatorId) {
-      return;
-    }
-  } else if (configuredEvaluatorName) {
-    if (evaluatorName !== configuredEvaluatorName) {
-      return;
-    }
-  } else {
+  const route = routes.find(
+    ({ evaluatorId: configuredId, evaluatorName: configuredName }) => {
+      if (configuredId) {
+        return evaluatorId === configuredId;
+      }
+      return configuredName ? evaluatorName === configuredName : false;
+    },
+  );
+
+  if (!route) {
     return;
   }
 
-  const evaluatorJson = scores.find((score) =>
-    score.comment?.includes("fields"),
-  )?.comment;
+  const evaluatorJson =
+    route.fieldCategory === undefined
+      ? scores.find((score) => score.comment?.includes("fields"))?.comment
+      : scores.find((score) => {
+          if (!score.comment) {
+            return false;
+          }
+
+          try {
+            const parsed: unknown = JSON.parse(score.comment);
+            return (
+              typeof parsed === "object" &&
+              parsed !== null &&
+              !Array.isArray(parsed) &&
+              Array.isArray((parsed as { fields?: unknown }).fields)
+            );
+          } catch {
+            return false;
+          }
+        })?.comment;
+
+  if (route.fieldCategory !== undefined && !evaluatorJson) {
+    return;
+  }
 
   try {
     await ahFieldScoreLambdaClient.send(
@@ -618,6 +654,9 @@ async function notifyAhFieldEvaluatorLambda({
             evaluator_score_name: evaluatorName,
             write_scores: true,
             ...(evaluatorJson ? { evaluator_json: evaluatorJson } : {}),
+            ...(route.fieldCategory
+              ? { field_category: route.fieldCategory }
+              : {}),
           }),
         ),
       }),

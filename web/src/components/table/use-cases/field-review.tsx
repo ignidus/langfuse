@@ -11,6 +11,10 @@ export type FieldReviewRow = {
   id: string;
   workatoJobId: string | null;
   field: string;
+  category:
+    | "identity_contact"
+    | "coverage_claims_documents"
+    | "operations_class_staffing";
   workatoValue: string | null;
   originalPdfValue: string | null;
   result: string;
@@ -148,22 +152,49 @@ export function FieldReviewTable({
       </div>
 
       {/* Table */}
-      <SimpleDataTable
-        columns={columns}
-        data={filteredData}
-        isLoading={isLoading}
-        noResults={
-          <div className="flex flex-col items-center gap-2 py-8">
-            <p className="text-sm font-medium text-muted-foreground">
-              No field review data
-            </p>
-            <p className="text-xs text-muted-foreground">
-              No field scores matching the criteria were found for this trace.
-            </p>
-          </div>
-        }
-        presentation="default"
-      />
+      {(
+        [
+          { id: "identity_contact", title: "Identity & Contact" },
+          {
+            id: "coverage_claims_documents",
+            title: "Coverage, Claims & Documents",
+          },
+          {
+            id: "operations_class_staffing",
+            title: "Operations, Class & Staffing",
+          },
+        ] as const
+      ).map(({ id, title }) => {
+        const hasSavedRows = fieldReviewData?.some((row) => row.category === id);
+        const rows = filteredData.filter((row) => row.category === id);
+
+        return (
+          <details key={id} open className="rounded-lg border">
+            <summary className="cursor-pointer px-4 py-3 font-medium">
+              {title}
+            </summary>
+            <div className="px-4 pb-4">
+              {!isLoading && !hasSavedRows ? (
+                <p className="py-4 text-sm text-muted-foreground">
+                  Not evaluated
+                </p>
+              ) : (
+                <SimpleDataTable
+                  columns={columns}
+                  data={rows}
+                  isLoading={isLoading}
+                  noResults={
+                    <p className="py-4 text-center text-sm text-muted-foreground">
+                      No fields match the selected result filter.
+                    </p>
+                  }
+                  presentation="default"
+                />
+              )}
+            </div>
+          </details>
+        );
+      })}
     </div>
   );
 }
