@@ -702,6 +702,10 @@ const EnvSchema = z.object({
   // Allied Health field-level evaluator Lambda integration
   AH_FIELD_EVALUATOR_ID: z.string().optional(),
   AH_FIELD_EVALUATOR_NAME: z.string().optional(),
+  AH_COVERAGE_FIELD_EVALUATOR_ID: z.string().optional(),
+  AH_COVERAGE_FIELD_EVALUATOR_NAME: z.string().optional(),
+  AH_OPERATIONS_FIELD_EVALUATOR_ID: z.string().optional(),
+  AH_OPERATIONS_FIELD_EVALUATOR_NAME: z.string().optional(),
   AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME: z.string().optional(),
 });
 

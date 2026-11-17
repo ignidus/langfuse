@@ -62,6 +62,7 @@ import {
   deleteScores,
   getTracesIdentifierForSession,
   validateConfigAgainstBody,
+  getTracesTable,
 } from "@langfuse/shared/src/server";
 import { v4 } from "uuid";
 import { throwIfNoEntitlement } from "@/src/features/entitlements/server/hasEntitlement";
@@ -1183,6 +1184,44 @@ export const scoresRouter = createTRPCRouter({
     .query(async ({ input }) => {
       return (await getScoreMetadataById(input.projectId, input.id)) ?? null;
     }),
+  decisionQualityReview: protectedProjectProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        traceId: z.string(),
+      }),
+    )
+    .query(async ({ input }) => {
+      const [score] = await getScoresUiTable({
+        projectId: input.projectId,
+        filter: [
+          {
+            column: "name",
+            type: "string",
+            operator: "=",
+            value: "AH Decision Quality – Risk Flags, Eligibility & Pricing",
+          },
+          {
+            column: "traceId",
+            type: "string",
+            operator: "=",
+            value: input.traceId,
+          },
+        ],
+        orderBy: { column: "timestamp", order: "DESC" },
+        limit: 1,
+        offset: 0,
+        excludeMetadata: true,
+        includeHasMetadataFlag: false,
+      });
+
+      return score
+        ? {
+            verdict: score.stringValue,
+            reasoning: score.comment,
+          }
+        : null;
+    }),
   fieldReview: protectedProjectProcedure
     .input(
       z.object({
@@ -1238,11 +1277,18 @@ export const scoresRouter = createTRPCRouter({
         .map((score) => {
           const metadata = score.metadata as Record<string, unknown> | null;
           const fieldName = score.name.replace("ah_field_", "");
+          const fieldCategory = metadata?.field_category;
+          const category =
+            fieldCategory === "coverage_claims_documents" ||
+            fieldCategory === "operations_class_staffing"
+              ? fieldCategory
+              : "identity_contact";
 
           return {
             id: score.id,
             workatoJobId: workatoJobId,
             field: fieldName || score.name,
+            category,
             workatoValue: (metadata?.workato_value as string | null) || null,
             originalPdfValue:
               (metadata?.original_pdf_value as string | null) || null,
@@ -1253,5 +1299,86 @@ export const scoresRouter = createTRPCRouter({
         });
 
       return tableData;
+    }),
+  aiSummaryReview: protectedProjectProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        traceId: z.string(),
+      }),
+    )
+    .query(async ({ input }) => {
+      const scores = await getScoresUiTable({
+        projectId: input.projectId,
+        filter: [
+          {
+            column: "name",
+            type: "string",
+            operator: "=",
+            value: "AH AI Summary Quality",
+          },
+          {
+            column: "traceId",
+            type: "string",
+            operator: "=",
+            value: input.traceId,
+          },
+        ],
+        orderBy: { column: "timestamp", order: "DESC" },
+        limit: 1,
+        offset: 0,
+        excludeMetadata: true,
+        includeHasMetadataFlag: false,
+      });
+
+      const latestScore = scores[0];
+
+      if (!latestScore) {
+        return null;
+      }
+
+      // Fetch execution trace metrics if executionTraceId exists
+      let durationMs: number | null = null;
+      let estimatedCostUsd: number | null = null;
+
+      if (latestScore.executionTraceId) {
+        try {
+          const executionTraces = await getTracesTable({
+            projectId: input.projectId,
+            filter: [
+              {
+                column: "id",
+                type: "string",
+                operator: "=",
+                value: latestScore.executionTraceId,
+              },
+            ],
+            orderBy: { column: "timestamp", order: "DESC" },
+            limit: 1,
+          });
+
+          const executionTrace = executionTraces[0];
+          if (executionTrace) {
+            durationMs = executionTrace.latency ?? null;
+            if (executionTrace.calculatedTotalCost) {
+              estimatedCostUsd = executionTrace.calculatedTotalCost.toNumber();
+            }
+          }
+        } catch (error) {
+          logger.warn(
+            `Failed to fetch execution trace ${latestScore.executionTraceId}`,
+            error,
+          );
+          // Continue without execution metrics
+        }
+      }
+
+      return {
+        score: latestScore.value,
+        reasoning: latestScore.comment ?? null,
+        timestamp: String(latestScore.timestamp),
+        durationMs,
+        estimatedCostUsd,
+      };
     }),
 });

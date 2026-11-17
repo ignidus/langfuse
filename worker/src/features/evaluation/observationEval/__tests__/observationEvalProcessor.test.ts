@@ -1327,6 +1327,10 @@ describe("processObservationEval", () => {
       originalEnv = { ...process.env };
       delete process.env.AH_FIELD_EVALUATOR_ID;
       delete process.env.AH_FIELD_EVALUATOR_NAME;
+      delete process.env.AH_COVERAGE_FIELD_EVALUATOR_ID;
+      delete process.env.AH_COVERAGE_FIELD_EVALUATOR_NAME;
+      delete process.env.AH_OPERATIONS_FIELD_EVALUATOR_ID;
+      delete process.env.AH_OPERATIONS_FIELD_EVALUATOR_NAME;
       delete process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME;
       lambdaSendMock.mockReset();
       lambdaSendMock.mockResolvedValue({});
@@ -1339,7 +1343,7 @@ describe("processObservationEval", () => {
 
     const setupLambdaEval = async (
       evaluatorName: string,
-      scoreComment?: string,
+      scoreComment?: string | null,
     ) => {
       vi.resetModules();
       const [
@@ -1455,6 +1459,133 @@ describe("processObservationEval", () => {
         write_scores: true,
         evaluator_json: evaluatorJson,
       });
+    });
+
+    it("routes a coverage evaluator by ID and sends its category with the JSON", async () => {
+      process.env.AH_COVERAGE_FIELD_EVALUATOR_ID = "evaluator-ah-fields-123";
+      process.env.AH_COVERAGE_FIELD_EVALUATOR_NAME = "Different coverage name";
+      process.env.AH_OPERATIONS_FIELD_EVALUATOR_ID = "evaluator-ah-fields-123";
+      process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
+        "allied-health-field-score-exploder-dev";
+      const evaluatorJson = JSON.stringify({
+        fields: [{ name: "claim_status", value: "active" }],
+      });
+      const { processEval, deps } = await setupLambdaEval(
+        "AH Coverage Claims Evaluator",
+        evaluatorJson,
+      );
+
+      const { payload } = await invokeAndReadCommand(processEval, deps);
+
+      expect(lambdaSendMock).toHaveBeenCalledTimes(1);
+      expect(payload).toEqual({
+        trace_id: "trace-abc",
+        observation_id: "obs-xyz",
+        environment: "development",
+        evaluator_score_name: "AH Coverage Claims Evaluator",
+        write_scores: true,
+        evaluator_json: evaluatorJson,
+        field_category: "coverage_claims_documents",
+      });
+    });
+
+    it("routes an operations evaluator by configured name", async () => {
+      process.env.AH_OPERATIONS_FIELD_EVALUATOR_NAME =
+        "AH Operations Class Staffing Evaluator";
+      process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
+        "allied-health-field-score-exploder-dev";
+      const evaluatorJson = JSON.stringify({
+        fields: [{ name: "staffing_level", value: "adequate" }],
+      });
+      const { processEval, deps } = await setupLambdaEval(
+        "AH Operations Class Staffing Evaluator",
+        evaluatorJson,
+      );
+
+      const { payload } = await invokeAndReadCommand(processEval, deps);
+
+      expect(lambdaSendMock).toHaveBeenCalledTimes(1);
+      expect(payload).toEqual({
+        trace_id: "trace-abc",
+        observation_id: "obs-xyz",
+        environment: "development",
+        evaluator_score_name: "AH Operations Class Staffing Evaluator",
+        write_scores: true,
+        evaluator_json: evaluatorJson,
+        field_category: "operations_class_staffing",
+      });
+    });
+
+    it("continues to other routes when the Identity evaluator ID mismatches", async () => {
+      process.env.AH_FIELD_EVALUATOR_ID = "different-identity-id";
+      process.env.AH_FIELD_EVALUATOR_NAME =
+        "AH Field Accuracy - Submission Identity & Contact";
+      process.env.AH_COVERAGE_FIELD_EVALUATOR_ID = "evaluator-ah-fields-123";
+      process.env.AH_COVERAGE_FIELD_EVALUATOR_NAME = "Different coverage name";
+      process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
+        "allied-health-field-score-exploder-dev";
+      const evaluatorJson = JSON.stringify({ fields: [{ name: "claim_id" }] });
+      const { processEval, deps } = await setupLambdaEval(
+        "AH Field Accuracy - Submission Identity & Contact",
+        evaluatorJson,
+      );
+
+      const { payload } = await invokeAndReadCommand(processEval, deps);
+
+      expect(lambdaSendMock).toHaveBeenCalledTimes(1);
+      expect(payload).toMatchObject({
+        evaluator_json: evaluatorJson,
+        field_category: "coverage_claims_documents",
+      });
+    });
+
+    it.each([
+      { description: "invalid JSON", scoreComment: "not-json" },
+      {
+        description: "a JSON object without a fields array",
+        scoreComment: JSON.stringify({ result: "no fields" }),
+      },
+      { description: "a missing score comment", scoreComment: null },
+    ])(
+      "does not invoke the Coverage route for $description",
+      async ({ scoreComment }) => {
+        process.env.AH_COVERAGE_FIELD_EVALUATOR_ID =
+          "evaluator-ah-fields-123";
+        process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
+          "allied-health-field-score-exploder-dev";
+        const { processEval, deps } = await setupLambdaEval(
+          "AH Coverage Claims Evaluator",
+          scoreComment,
+        );
+
+        await processEval({
+          event: baseEvent,
+          executionType: EvalTemplateType.LLM_AS_A_JUDGE,
+          deps,
+        });
+
+        expect(lambdaSendMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it("keeps Identity ID precedence over its configured name", async () => {
+      process.env.AH_FIELD_EVALUATOR_ID = "different-identity-id";
+      process.env.AH_FIELD_EVALUATOR_NAME =
+        "AH Field Accuracy - Submission Identity & Contact";
+      process.env.AH_FIELD_SCORE_LAMBDA_FUNCTION_NAME =
+        "allied-health-field-score-exploder-dev";
+      const { processEval, deps } = await setupLambdaEval(
+        "AH Field Accuracy - Submission Identity & Contact",
+        JSON.stringify({ fields: [] }),
+      );
+
+      await processEval({
+        event: baseEvent,
+        executionType: EvalTemplateType.LLM_AS_A_JUDGE,
+        deps,
+      });
+
+      expect(lambdaSendMock).not.toHaveBeenCalled();
     });
 
     it("omits evaluator_json when no score comment contains fields", async () => {
