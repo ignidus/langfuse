@@ -26,6 +26,9 @@ env:
   WORKER_TASK_FAMILY: langfuse-worker-dev
   EXECUTION_ROLE_ARN: "arn:aws:iam::694679581764:role/langfuse-execution"
   TASK_ROLE_ARN: "arn:aws:iam::694679581764:role/langfuse-task"
+  # CrowdStrike Falcon container sensor image is hosted in the Production account
+  FALCON_ECR_ACCOUNT: "049005703416"
+  FALCON_ECR_REPO: falcon-sensor/falcon-container
 
 jobs:
   build-and-deploy:
@@ -93,16 +96,53 @@ jobs:
               td = json.load(f)
           for key in ['taskDefinitionArn','revision','status','requiresAttributes','compatibilities','registeredAt','registeredBy']:
               td.pop(key, None)
-          # Update image
+          # Update image (app container is the only one besides the Falcon init container)
           registry = '${{ steps.login-ecr.outputs.registry }}'
           repo = '${{ steps.vars.outputs.ecr_repo }}'
           tag = '${{ github.sha }}'
           new_image = f'{registry}/{repo}:{tag}'
-          td['containerDefinitions'][0]['image'] = new_image
+          for c in td['containerDefinitions']:
+              if c['name'] != 'crowdstrike-falcon-init-container':
+                  c['image'] = new_image
           with open('/tmp/task-def-updated.json', 'w') as f:
               json.dump(td, f)
           print(f'Updated image to: {new_image}')
           "
+
+      - name: Patch task definition with Falcon sensor
+        run: |
+          FALCON_REGISTRY="${{ env.FALCON_ECR_ACCOUNT }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com"
+          FALCON_IMAGE="${FALCON_REGISTRY}/${{ env.FALCON_ECR_REPO }}:latest"
+          FALCON_CID=$(aws secretsmanager get-secret-value --secret-id crowdstrike/falcon/config \
+            --query SecretString --output text | jq -r '.FALCON_CID')
+          echo "::add-mask::$FALCON_CID"
+
+          ECR_PASSWORD=$(aws ecr get-login-password --region ${{ env.AWS_REGION }})
+          echo "$ECR_PASSWORD" | docker login --username AWS --password-stdin "$FALCON_REGISTRY"
+          AUTH=$(echo -n "AWS:$ECR_PASSWORD" | base64 -w 0)
+          PULL_TOKEN=$(jq -nc --arg auth "$AUTH" --arg falcon "$FALCON_REGISTRY" --arg app "${{ steps.login-ecr.outputs.registry }}" \
+            '{auths: {($falcon): {auth: $auth}, ($app): {auth: $auth}}}' | base64 -w 0)
+
+          # The live task definition is the template, so strip a previous Falcon injection
+          # before patching. These task definitions never set entryPoint/command, so the
+          # patcher re-derives them from the new image.
+          jq '
+            .volumes = ((.volumes // []) | map(select(.name != "crowdstrike-falcon-volume")))
+            | .containerDefinitions |= (map(select(.name != "crowdstrike-falcon-init-container")) | map(
+                (if ((.entryPoint // [])[0] // "" | startswith("/tmp/CrowdStrike/")) then del(.entryPoint, .command) else . end)
+                | .mountPoints = ((.mountPoints // []) | map(select(.sourceVolume != "crowdstrike-falcon-volume")))
+                | .environment = ((.environment // []) | map(select(.name != "FALCONCTL_OPTS")))
+                | .dependsOn = ((.dependsOn // []) | map(select(.containerName != "crowdstrike-falcon-init-container")))
+                | if .dependsOn == [] then del(.dependsOn) else . end
+                | if .linuxParameters.capabilities.add then .linuxParameters.capabilities.add -= ["SYS_PTRACE"] else . end))
+          ' /tmp/task-def-updated.json > task-def-clean.json
+
+          docker run --rm -v "$(pwd):/mnt" --user 0:0 "$FALCON_IMAGE" \
+            --ecs-spec-file /mnt/task-def-clean.json \
+            --cid "$FALCON_CID" \
+            --image "$FALCON_IMAGE" \
+            --pulltoken "$PULL_TOKEN" \
+            > /tmp/task-def-updated.json
 
       - name: Register new task definition
         id: register
