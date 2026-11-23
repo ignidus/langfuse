@@ -1,12 +1,14 @@
+import Link from "next/link";
+import { ClipboardCheck } from "lucide-react";
 import { api } from "@/src/utils/api";
+import { Button } from "@/src/components/ui/button";
 import { PublishTraceSwitch } from "@/src/components/publish-object-switch";
 import { DeleteTraceButton } from "@/src/components/deleteButton";
 
 /**
- * Trace-level header actions (publish / delete) shared by the peek and
- * the standalone trace page, so both surfaces expose the same controls. Each
- * sub-component renders DISABLED (not hidden) when the user lacks the relevant
- * project scope, matching the page's long-standing behavior.
+ * Trace-level header actions shared by the peek and standalone trace page.
+ * Share and Delete render disabled when the user lacks the relevant project
+ * scope; Field Review navigation is omitted on shared-only trace pages.
  *
  * `layout="toolbar"` (default) is the inline icon row; `layout="menu"` renders
  * the same controls as full-width labeled rows for the peek's overflow popover
@@ -32,6 +34,7 @@ export function TraceDetailActions({
   timestamp,
   deleteRedirectUrl,
   onAfterDelete,
+  showFieldReview = true,
   size = "icon-xs",
   layout = "toolbar",
 }: {
@@ -43,6 +46,7 @@ export function TraceDetailActions({
   timestamp?: Date;
   deleteRedirectUrl?: string;
   onAfterDelete?: (deletedTraceId: string) => void;
+  showFieldReview?: boolean;
   size?: "icon" | "icon-xs";
   layout?: "toolbar" | "menu";
 }) {
@@ -70,6 +74,21 @@ export function TraceDetailActions({
           shareUrl={shareUrl}
           label="Share"
         />
+        {showFieldReview && (
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start font-normal"
+          >
+            <Link
+              href={`/project/${projectId}/field-review?traceId=${encodeURIComponent(traceId)}`}
+            >
+              <ClipboardCheck className="mr-2 h-4 w-4" aria-hidden="true" />
+              View Field Review
+            </Link>
+          </Button>
+        )}
         <DeleteTraceButton
           itemId={traceId}
           projectId={projectId}
@@ -86,6 +105,21 @@ export function TraceDetailActions({
 
   return (
     <div className="flex flex-row items-center gap-1">
+      {showFieldReview && (
+        <Button
+          asChild
+          variant="ghost"
+          size={size}
+          aria-label="View Field Review"
+          title="View Field Review"
+        >
+          <Link
+            href={`/project/${projectId}/field-review?traceId=${encodeURIComponent(traceId)}`}
+          >
+            <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </Button>
+      )}
       <PublishTraceSwitch
         projectId={projectId}
         traceId={traceId}

@@ -31,10 +31,34 @@ export function FieldReviewTable({
   projectId: string;
   traceId: string;
 }) {
+  return (
+    <FieldReviewTableForTrace
+      key={JSON.stringify([projectId, traceId])}
+      projectId={projectId}
+      traceId={traceId}
+    />
+  );
+}
+
+function FieldReviewTableForTrace({
+  projectId,
+  traceId,
+}: {
+  projectId: string;
+  traceId: string;
+}) {
   const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
 
   // Fetch field review data
   const { data: fieldReviewData, isLoading, error } = api.scores.fieldReview.useQuery(
+    { projectId, traceId },
+    { enabled: !!projectId && !!traceId },
+  );
+  const {
+    data: fieldCategoryReviews,
+    isLoading: isCategoryReviewsLoading,
+    error: categoryReviewsError,
+  } = api.scores.fieldCategoryReviews.useQuery(
     { projectId, traceId },
     { enabled: !!projectId && !!traceId },
   );
@@ -165,7 +189,10 @@ export function FieldReviewTable({
           },
         ] as const
       ).map(({ id, title }) => {
-        const hasSavedRows = fieldReviewData?.some((row) => row.category === id);
+        const categoryReview = fieldCategoryReviews?.[id] ?? null;
+        const hasSavedRows = fieldReviewData?.some(
+          (row) => row.category === id,
+        );
         const rows = filteredData.filter((row) => row.category === id);
 
         return (
@@ -174,11 +201,28 @@ export function FieldReviewTable({
               {title}
             </summary>
             <div className="px-4 pb-4">
-              {!isLoading && !hasSavedRows ? (
-                <p className="py-4 text-sm text-muted-foreground">
-                  Not evaluated
+              {isCategoryReviewsLoading ? (
+                <p className="py-2 text-sm text-muted-foreground">
+                  Loading category evaluation…
                 </p>
-              ) : (
+              ) : categoryReviewsError ? (
+                <p className="py-2 text-sm text-destructive">
+                  Error loading category evaluation: {categoryReviewsError.message}
+                </p>
+              ) : categoryReview ? (
+                <div className="mb-4 space-y-2 border-b pb-4">
+                  <p className="text-sm font-bold">
+                    {categoryReview.verdict?.replace(/_/g, " ") ??
+                      "Verdict unavailable"}
+                  </p>
+                  <p className="whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
+                    {categoryReview.reasoning?.trim()
+                      ? categoryReview.reasoning
+                      : "Reasoning was not recorded for this evaluation."}
+                  </p>
+                </div>
+              ) : null}
+              {isLoading || hasSavedRows ? (
                 <SimpleDataTable
                   columns={columns}
                   data={rows}
@@ -190,6 +234,18 @@ export function FieldReviewTable({
                   }
                   presentation="default"
                 />
+              ) : isCategoryReviewsLoading ? (
+                <p className="py-4 text-sm text-muted-foreground">
+                  Loading field results…
+                </p>
+              ) : categoryReviewsError ? null : categoryReview ? (
+                <p className="py-4 text-sm text-muted-foreground">
+                  No individual field results are available for this evaluation.
+                </p>
+              ) : (
+                <p className="py-4 text-sm text-muted-foreground">
+                  No evaluation result is recorded for this category.
+                </p>
               )}
             </div>
           </details>

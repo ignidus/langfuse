@@ -44,6 +44,10 @@ export function AiSummaryReview({
     );
   }
 
+  const reasoning = summaryReview.data.reasoning?.trim()
+    ? summaryReview.data.reasoning
+    : "Reasoning was not recorded for this evaluation.";
+
   return (
     <div className="space-y-4">
       <div className="rounded-lg border bg-card p-6">
@@ -83,9 +87,8 @@ export function AiSummaryReview({
 
       <div className="rounded-lg border bg-card p-6">
         <h2 className="text-base font-semibold">Evaluator reasoning</h2>
-        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
-          {summaryReview.data.reasoning ??
-            "No evaluator reasoning was saved for this score."}
+        <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
+          {reasoning}
         </p>
       </div>
     </div>

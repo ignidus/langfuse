@@ -137,6 +137,7 @@ export function TracePage({
               isPublic={trace.data.public}
               name={trace.data.name}
               timestamp={timestamp}
+              showFieldReview={!showPublicIndicators}
               deleteRedirectUrl={`/project/${router.query.projectId as string}/traces`}
             />
           </>
@@ -151,6 +152,7 @@ export function TracePage({
             isPublic={trace.data.public}
             name={trace.data.name}
             timestamp={timestamp}
+            showFieldReview={!showPublicIndicators}
             deleteRedirectUrl={`/project/${router.query.projectId as string}/traces`}
             layout="menu"
           />
