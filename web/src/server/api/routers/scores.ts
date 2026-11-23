@@ -34,6 +34,7 @@ import {
   CORRECTION_NAME,
 } from "@langfuse/shared";
 import {
+  getScoresForTraces,
   getScoresGroupedByNameSourceType,
   getScoresUiCount,
   getScoresUiTable,
@@ -103,6 +104,64 @@ type AllScoresFromEventsReturnType = Omit<ScoreDomain, "metadata"> & {
 };
 
 const BOOLEAN_SCORE_VALUE_OPTIONS = [{ value: "true" }, { value: "false" }];
+
+const FIELD_CATEGORY_EVALUATOR_NAMES = {
+  identity_contact: [
+    "AH Field Accuracy – Submission Identity & Contact",
+    "AH Field Accuracy - Submission Identity & Contact",
+  ],
+  coverage_claims_documents:
+    "AH Field Accuracy – Coverage, Claims & Required Documents",
+  operations_class_staffing:
+    "AH Field Accuracy – Operations, Class & Staffing",
+} as const;
+
+const getLatestEvaluationScore = (
+  scores: ScoreDomain[],
+  scoreNames: string | readonly string[],
+): ScoreDomain | null => {
+  const matchingScoreNames =
+    typeof scoreNames === "string" ? [scoreNames] : scoreNames;
+
+  return scores.reduce<ScoreDomain | null>(
+    (latestScore: ScoreDomain | null, score: ScoreDomain) => {
+      if (
+        !matchingScoreNames.includes(score.name) ||
+        score.source !== ScoreSourceEnum.EVAL
+      ) {
+        return latestScore;
+      }
+
+      if (
+        !latestScore ||
+        score.timestamp.getTime() > latestScore.timestamp.getTime()
+      ) {
+        return score;
+      }
+
+      return latestScore;
+    },
+    null,
+  );
+};
+
+const getLatestEvaluationScoreForTrace = async ({
+  projectId,
+  traceId,
+  scoreName,
+}: {
+  projectId: string;
+  traceId: string;
+  scoreName: string;
+}): Promise<ScoreDomain | null> => {
+  const scores = await getScoresForTraces({
+    projectId,
+    traceIds: [traceId],
+    excludeMetadata: true,
+  });
+
+  return getLatestEvaluationScore(scores, scoreName);
+};
 
 export const scoresRouter = createTRPCRouter({
   /**
@@ -1192,33 +1251,18 @@ export const scoresRouter = createTRPCRouter({
       }),
     )
     .query(async ({ input }) => {
-      const [score] = await getScoresUiTable({
+      const score = await getLatestEvaluationScoreForTrace({
         projectId: input.projectId,
-        filter: [
-          {
-            column: "name",
-            type: "string",
-            operator: "=",
-            value: "AH Decision Quality – Risk Flags, Eligibility & Pricing",
-          },
-          {
-            column: "traceId",
-            type: "string",
-            operator: "=",
-            value: input.traceId,
-          },
-        ],
-        orderBy: { column: "timestamp", order: "DESC" },
-        limit: 1,
-        offset: 0,
-        excludeMetadata: true,
-        includeHasMetadataFlag: false,
+        traceId: input.traceId,
+        scoreName: "AH Decision Quality – Risk Flags, Eligibility & Pricing",
       });
 
       return score
         ? {
+            scoreId: score.id,
             verdict: score.stringValue,
             reasoning: score.comment,
+            timestamp: String(score.timestamp),
           }
         : null;
     }),
@@ -1303,6 +1347,44 @@ export const scoresRouter = createTRPCRouter({
 
       return tableData;
     }),
+  fieldCategoryReviews: protectedProjectProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        traceId: z.string(),
+      }),
+    )
+    .query(async ({ input }) => {
+      const scores = await getScoresForTraces({
+        projectId: input.projectId,
+        traceIds: [input.traceId],
+        excludeMetadata: true,
+      });
+
+      const toCategoryReview = (scoreNames: string | readonly string[]) => {
+        const score = getLatestEvaluationScore(scores, scoreNames);
+        return score
+          ? {
+              scoreId: score.id,
+              verdict: score.stringValue,
+              reasoning: score.comment,
+              timestamp: String(score.timestamp),
+            }
+          : null;
+      };
+
+      return {
+        identity_contact: toCategoryReview(
+          FIELD_CATEGORY_EVALUATOR_NAMES.identity_contact,
+        ),
+        coverage_claims_documents: toCategoryReview(
+          FIELD_CATEGORY_EVALUATOR_NAMES.coverage_claims_documents,
+        ),
+        operations_class_staffing: toCategoryReview(
+          FIELD_CATEGORY_EVALUATOR_NAMES.operations_class_staffing,
+        ),
+      };
+    }),
   aiSummaryReview: protectedProjectProcedure
     .input(
       z.object({
@@ -1311,30 +1393,11 @@ export const scoresRouter = createTRPCRouter({
       }),
     )
     .query(async ({ input }) => {
-      const scores = await getScoresUiTable({
+      const latestScore = await getLatestEvaluationScoreForTrace({
         projectId: input.projectId,
-        filter: [
-          {
-            column: "name",
-            type: "string",
-            operator: "=",
-            value: "AH AI Summary Quality",
-          },
-          {
-            column: "traceId",
-            type: "string",
-            operator: "=",
-            value: input.traceId,
-          },
-        ],
-        orderBy: { column: "timestamp", order: "DESC" },
-        limit: 1,
-        offset: 0,
-        excludeMetadata: true,
-        includeHasMetadataFlag: false,
+        traceId: input.traceId,
+        scoreName: "AH AI Summary Quality",
       });
-
-      const latestScore = scores[0];
 
       if (!latestScore) {
         return null;
@@ -1375,6 +1438,7 @@ export const scoresRouter = createTRPCRouter({
       }
 
       return {
+        scoreId: latestScore.id,
         score: latestScore.value,
         reasoning: latestScore.comment ?? null,
         timestamp: String(latestScore.timestamp),

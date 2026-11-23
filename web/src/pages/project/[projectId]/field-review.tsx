@@ -16,6 +16,7 @@ export default function FieldReviewPage() {
   if (!traceId) {
     return (
       <Page
+        scrollable
         headerProps={{
           title: "Field Review",
           help: {
@@ -36,6 +37,7 @@ export default function FieldReviewPage() {
 
   return (
     <Page
+      scrollable
       headerProps={{
         title: "Field Review",
         help: {
@@ -75,11 +77,11 @@ export default function FieldReviewPage() {
                   {decisionQuality.data.verdict?.replace(/_/g, " ") ??
                     "Verdict unavailable"}
                 </p>
-                {decisionQuality.data.reasoning && (
-                  <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
-                    {decisionQuality.data.reasoning}
-                  </p>
-                )}
+                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
+                  {decisionQuality.data.reasoning?.trim()
+                    ? decisionQuality.data.reasoning
+                    : "Reasoning was not recorded for this evaluation."}
+                </p>
               </>
             ) : (
               <p className="text-sm text-muted-foreground">Not evaluated</p>
