@@ -101,6 +101,7 @@ export default function Traces() {
           projectId={projectId}
           showControlsInPageHeader
           enableAppRootDefault
+          showFieldReview
         />
       ) : (
         <TracesTable projectId={projectId} showControlsInPageHeader />

@@ -144,6 +144,10 @@ import {
 } from "@/src/components/table/utils/refresh-intervals";
 import useSessionStorage from "@/src/components/useSessionStorage";
 import { api } from "@/src/utils/api";
+import {
+  FIELD_REVIEW_EVIDENCE_NAME,
+  FieldReviewCell,
+} from "@/src/features/events/components/FieldReviewCell";
 import { RunEvaluationDialog } from "@/src/features/batch-actions/components/RunEvaluationDialog/index";
 import { AddObservationsToDatasetDialog } from "@/src/features/batch-actions/components/AddObservationsToDatasetDialog/index";
 import { useHasEntitlement } from "@/src/features/entitlements";
@@ -260,6 +264,7 @@ export type EventsTableProps = {
   showControlsInPageHeader?: boolean;
   /** Explicit signal from the Fast Preview/v4 page routes. */
   enableAppRootDefault?: boolean;
+  showFieldReview?: boolean;
   /**
    * Keep an embedded table's filters, search, and saved views independent from
    * the project-wide observations page. The project date range remains shared.
@@ -302,6 +307,7 @@ export default function ObservationsEventsTable({
   externalFilterState,
   externalDateRange,
   limitRows,
+  showFieldReview = false,
   sessionId,
   showControlsInPageHeader = false,
   enableAppRootDefault = false,
@@ -442,12 +448,13 @@ export default function ObservationsEventsTable({
     setChartRefreshedAt(startOfMinute(new Date()).getTime());
     Promise.all([
       utils.events.all.invalidate(),
+      ...(showFieldReview ? [utils.events.listCursor.invalidate()] : []),
       utils.events.countAll.invalidate(),
       // Invalidate filterOptions too so the "Total ≈ X" count refreshes.
       utils.events.filterOptions.invalidate(),
       utils.dashboard.executeQuery.invalidate(),
     ]);
-  }, [utils]);
+  }, [showFieldReview, utils]);
 
   useEffect(() => {
     if (!refreshInterval) return;
@@ -1217,6 +1224,28 @@ export default function ObservationsEventsTable({
       size: 150,
       enableSorting,
     }),
+    ...(showFieldReview
+      ? [
+          {
+            accessorKey: "fieldReview",
+            id: "fieldReview",
+            header: "Field Review",
+            size: 170,
+            enableSorting: false,
+            enableHiding: true,
+            cell: ({ row }: { row: { original: EventsTableRow } }) => {
+              const { id, name, traceId } = row.original;
+              return name === FIELD_REVIEW_EVIDENCE_NAME && traceId ? (
+                <FieldReviewCell
+                  projectId={projectId}
+                  traceId={traceId}
+                  observationId={id}
+                />
+              ) : null;
+            },
+          } satisfies LangfuseColumnDef<EventsTableRow>,
+        ]
+      : []),
     createTextTableColumn<EventsTableRow>({
       accessorKey: "traceName",
       header: getEventsColumnName("traceName"),
